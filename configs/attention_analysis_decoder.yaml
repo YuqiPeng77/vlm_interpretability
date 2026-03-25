@@ -1,0 +1,46 @@
+experiment:
+  type: attention_analysis
+  name: decoder_attention_affective
+
+model:
+  name: Qwen3-VL-8B
+  path: /data1/yqpeng/models/Qwen3-VL-8B-Instruct
+  device_map: auto
+  dtype: bfloat16
+
+dataset:
+  root: /data1/yqpeng/spatial/dataset
+  num_samples: 1
+  concepts:
+    - name: scary
+      csv: scary
+      group: affective
+    - name: soothing
+      csv: soothing
+      group: affective
+    - name: stressful
+      csv: stressful
+      group: affective
+    - name: natural
+      csv: natural
+      group: control
+    - name: natural light
+      csv: natural light
+      group: control
+    - name: rugged scene
+      csv: rugged scene
+      group: control
+
+attention_analysis:
+  prompt: "Does this image contain the attribute {attribute}? Answer with yes, or no."
+  top_k_heads: 10
+  token_groups:
+    - image
+    - text
+    - keyword
+
+output:
+  base_dir: ./output
+
+runtime:
+  seed: 42

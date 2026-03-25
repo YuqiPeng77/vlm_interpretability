@@ -1,0 +1,49 @@
+experiment:
+  type: patching
+  name: patching_decoder_activation
+
+model:
+  name: Qwen3-VL-8B
+  path: /data1/yqpeng/models/Qwen3-VL-8B-Instruct
+  device_map: auto
+  dtype: bfloat16
+
+dataset:
+  root: /data1/yqpeng/spatial/dataset
+  num_pairs: 0
+  concepts:
+    - name: natural
+      csv_stem: natural
+      group: non_affective
+    - name: natural light
+      csv_stem: natural light
+      group: non_affective
+    - name: rugged scene
+      csv_stem: rugged scene
+      group: non_affective
+    - name: scary
+      csv_stem: scary
+      group: affective
+    - name: soothing
+      csv_stem: soothing
+      group: affective
+    - name: stressful
+      csv_stem: stressful
+      group: affective
+
+patching:
+  stage: decoder
+  method: activation
+  metrics:
+    - probability_change
+  modes:
+    # - noise
+    # - zero
+    - counterfactual
+  prompt: "Does this image contain the attribute {attribute}? Answer with yes, or no."
+
+output:
+  base_dir: ./output
+
+runtime:
+  seed: 42
