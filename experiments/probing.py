@@ -20,10 +20,13 @@ from shared.hook_manager import HookManager
 from shared.metrics import (
     extract_decoder_feature,
     extract_encoder_feature,
-    train_logistic_probe,
+    train_logistic_probe_with_random_baseline,
 )
 from shared.model_loader import ModelBundle, load_model_bundle
-from shared.visualizer import plot_grouped_probing_accuracy
+from shared.visualizer import (
+    plot_grouped_probing_accuracy,
+    plot_single_attribute_probing_accuracy,
+)
 
 
 def build_prompt(processor, probing_config: dict) -> str:
@@ -83,6 +86,12 @@ class ProbingExperiment(BaseExperiment):
 
     def _resolved_prompt_text(self) -> str:
         return self.probing_config["prompt"]
+
+    def _model_display_name(self) -> str:
+        model_name = self.config.get("model", {}).get("name")
+        if model_name:
+            return str(model_name)
+        return Path(self.config["model"]["path"]).name
 
     def run(self) -> None:
         if self.bundle is None:
@@ -194,21 +203,33 @@ class ProbingExperiment(BaseExperiment):
             if "encoder" in self.components:
                 # Each slot gets its own linear probe so the accuracy curve remains
                 # interpretable as "how decodable is the concept at this stage".
-                encoder_acc, encoder_stats = train_logistic_probe(
+                encoder_acc, encoder_stats = train_logistic_probe_with_random_baseline(
                     enc_features,
                     labels_array,
                     enc_slots,
                     self.test_size,
                     int(self.runtime_config.get("seed", 42)),
+                    random_repeats=3,
                 )
                 concept_result["encoder_layer_accuracy"] = encoder_acc
+                concept_result["encoder_random_label_runs"] = [
+                    stat["random_accuracy_runs"] for stat in encoder_stats
+                ]
+                concept_result["encoder_random_label_mean"] = [
+                    stat["random_accuracy_mean"] for stat in encoder_stats
+                ]
+                concept_result["encoder_random_label_std"] = [
+                    stat["random_accuracy_std"] for stat in encoder_stats
+                ]
                 concept_result["encoder_stats"] = encoder_stats
                 summary_rows.extend(
                     {
                         "concept": concept.name,
                         "component": "encoder",
                         "slot": stat["slot"],
-                        "accuracy": stat["accuracy"],
+                        "real_accuracy": stat["accuracy"],
+                        "random_accuracy_mean": stat["random_accuracy_mean"],
+                        "random_accuracy_std": stat["random_accuracy_std"],
                         "n_train": stat["n_train"],
                         "n_test": stat["n_test"],
                     }
@@ -216,21 +237,33 @@ class ProbingExperiment(BaseExperiment):
                 )
 
             if "decoder" in self.components:
-                decoder_acc, decoder_stats = train_logistic_probe(
+                decoder_acc, decoder_stats = train_logistic_probe_with_random_baseline(
                     dec_features,
                     labels_array,
                     dec_slots,
                     self.test_size,
                     int(self.runtime_config.get("seed", 42)),
+                    random_repeats=3,
                 )
                 concept_result["decoder_layer_accuracy"] = decoder_acc
+                concept_result["decoder_random_label_runs"] = [
+                    stat["random_accuracy_runs"] for stat in decoder_stats
+                ]
+                concept_result["decoder_random_label_mean"] = [
+                    stat["random_accuracy_mean"] for stat in decoder_stats
+                ]
+                concept_result["decoder_random_label_std"] = [
+                    stat["random_accuracy_std"] for stat in decoder_stats
+                ]
                 concept_result["decoder_stats"] = decoder_stats
                 summary_rows.extend(
                     {
                         "concept": concept.name,
                         "component": "decoder",
                         "slot": stat["slot"],
-                        "accuracy": stat["accuracy"],
+                        "real_accuracy": stat["accuracy"],
+                        "random_accuracy_mean": stat["random_accuracy_mean"],
+                        "random_accuracy_std": stat["random_accuracy_std"],
                         "n_train": stat["n_train"],
                         "n_test": stat["n_test"],
                     }
@@ -247,6 +280,8 @@ class ProbingExperiment(BaseExperiment):
                 "seed": int(self.runtime_config.get("seed", 42)),
                 "test_size": self.test_size,
                 "max_samples_per_attr": self.max_samples,
+                "model_display_name": self._model_display_name(),
+                "random_label_repeats": 3,
                 "concept_groups": {
                     "non_affective": [concept.name for concept in self.concepts if concept.group == "non_affective"],
                     "affective": [concept.name for concept in self.concepts if concept.group == "affective"],
@@ -265,14 +300,35 @@ class ProbingExperiment(BaseExperiment):
             plot_grouped_probing_accuracy(
                 summary,
                 component="encoder",
-                output_path=self.plots_dir / "encoder_probing_accuracy.png",
+                output_path=self.plots_dir / self.plot_filename("encoder_probing_accuracy"),
                 dpi=int(self.probing_config.get("dpi", 300)),
             )
         if "decoder" in self.components:
             plot_grouped_probing_accuracy(
                 summary,
                 component="decoder",
-                output_path=self.plots_dir / "decoder_probing_accuracy.png",
+                output_path=self.plots_dir / self.plot_filename("decoder_probing_accuracy"),
                 dpi=int(self.probing_config.get("dpi", 300)),
             )
+        per_attribute_dir = self.plots_dir / "per_attribute"
+        per_attribute_dir.mkdir(parents=True, exist_ok=True)
+        for concept in self.concepts:
+            if concept.name not in summary_results:
+                continue
+            if "encoder" in self.components:
+                plot_single_attribute_probing_accuracy(
+                    summary,
+                    concept_name=concept.name,
+                    component="encoder",
+                    output_path=per_attribute_dir / self.plot_filename(f"{concept.name}_encoder_probing_accuracy"),
+                    dpi=int(self.probing_config.get("dpi", 300)),
+                )
+            if "decoder" in self.components:
+                plot_single_attribute_probing_accuracy(
+                    summary,
+                    concept_name=concept.name,
+                    component="decoder",
+                    output_path=per_attribute_dir / self.plot_filename(f"{concept.name}_decoder_probing_accuracy"),
+                    dpi=int(self.probing_config.get("dpi", 300)),
+                )
         self.log("Probing experiment completed.")

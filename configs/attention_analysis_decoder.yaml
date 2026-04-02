@@ -10,7 +10,7 @@ model:
 
 dataset:
   root: /data1/yqpeng/spatial/dataset
-  num_samples: 1
+  num_samples: 0
   concepts:
     - name: scary
       csv: scary
@@ -41,6 +41,7 @@ attention_analysis:
 
 output:
   base_dir: ./output
+  plot_format: png
 
 runtime:
   seed: 42

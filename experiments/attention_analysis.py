@@ -650,7 +650,7 @@ class AttentionAnalysisExperiment(BaseExperiment):
                 layer_indices=layer_indices,
                 allocation_summary=attention_score_allocation,
                 concept_name=concept.name,
-                save_path=attention_alloc_dir / f"{concept.name}_attention_score_allocation.png",
+                save_path=attention_alloc_dir / self.plot_filename(f"{concept.name}_attention_score_allocation"),
                 title="Layer-wise Attention Allocation",
                 ylabel="Mean Attention Weight",
             )
@@ -658,31 +658,31 @@ class AttentionAnalysisExperiment(BaseExperiment):
                 layer_indices=layer_indices,
                 allocation_summary=weighted_value_norm_allocation,
                 concept_name=concept.name,
-                save_path=attention_alloc_dir / f"{concept.name}_weighted_value_norm_allocation.png",
+                save_path=attention_alloc_dir / self.plot_filename(f"{concept.name}_weighted_value_norm_allocation"),
                 title="Layer-wise Weighted Value Norm",
                 ylabel="Mean Weighted Value L2 Norm",
             )
             plot_head_importance_heatmap(
                 importance=positive_norm,
-                save_path=head_importance_dir / f"{concept.name}_positive_weighted_value_norm_heatmap.png",
+                save_path=head_importance_dir / self.plot_filename(f"{concept.name}_positive_weighted_value_norm_heatmap"),
                 title=f"Positive Weighted Value Norm: {concept.name}",
                 colorbar_label="Mean L2 Norm",
             )
             plot_head_importance_heatmap(
                 importance=negative_norm,
-                save_path=head_importance_dir / f"{concept.name}_negative_weighted_value_norm_heatmap.png",
+                save_path=head_importance_dir / self.plot_filename(f"{concept.name}_negative_weighted_value_norm_heatmap"),
                 title=f"Negative Weighted Value Norm: {concept.name}",
                 colorbar_label="Mean L2 Norm",
             )
             plot_head_importance_heatmap(
                 importance=diff_norm,
-                save_path=head_importance_dir / f"{concept.name}_diff_weighted_value_norm_heatmap.png",
+                save_path=head_importance_dir / self.plot_filename(f"{concept.name}_diff_weighted_value_norm_heatmap"),
                 title=f"Positive vs Negative Diff Norm: {concept.name}",
                 colorbar_label="Diff L2 Norm",
             )
             plot_head_importance_heatmap(
                 importance=diff_norm,
-                save_path=top_heads_dir / "top_head_summary.png",
+                save_path=top_heads_dir / self.plot_filename("top_head_summary"),
                 title=f"Top Heads Summary: {concept.name}",
                 highlights=self._build_summary_heatmap_labels(top_heads),
                 colorbar_label="Diff L2 Norm",
@@ -699,7 +699,7 @@ class AttentionAnalysisExperiment(BaseExperiment):
                     concept_name=concept.name,
                     layer_idx=layer_idx,
                     head_idx=head_idx,
-                    save_path=top_heads_dir / f"top_head_L{layer_idx}_H{head_idx}.png",
+                    save_path=top_heads_dir / self.plot_filename(f"top_head_L{layer_idx}_H{head_idx}"),
                 )
                 top_head_details.append(
                     {
@@ -854,7 +854,7 @@ class AttentionAnalysisExperiment(BaseExperiment):
                 group_mean = np.mean(np.stack(matrices, axis=0), axis=0)
                 plot_head_importance_heatmap(
                     importance=group_mean,
-                    save_path=self._plot_dir("head_importance") / f"{group_name}_{stat_name}_weighted_value_norm_heatmap.png",
+                    save_path=self._plot_dir("head_importance") / self.plot_filename(f"{group_name}_{stat_name}_weighted_value_norm_heatmap"),
                     title=f"{group_name.replace('_', ' ').title()} {stat_name.title()} Weighted Value Norm",
                     colorbar_label="Mean L2 Norm" if stat_name in {"positive", "negative"} else "Diff L2 Norm",
                 )

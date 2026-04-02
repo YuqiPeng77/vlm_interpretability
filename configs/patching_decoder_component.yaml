@@ -10,7 +10,7 @@ model:
 
 dataset:
   root: /data1/yqpeng/spatial/dataset
-  num_pairs: 1
+  num_pairs: 0
   concepts:
     - name: natural
       csv_stem: natural
@@ -54,6 +54,7 @@ patching:
 
 output:
   base_dir: ./output
+  plot_format: png
 
 runtime:
   seed: 42

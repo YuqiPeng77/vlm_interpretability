@@ -14,6 +14,9 @@ class BaseExperiment(ABC):
         self.results_dir = output_dir / "results"
         self.plots_dir = output_dir / "plots"
         self.logs_dir = output_dir / "logs"
+        self.plot_format = str(config.get("output", {}).get("plot_format", "png")).lower()
+        if self.plot_format not in {"png", "pdf"}:
+            raise ValueError(f"Unsupported output.plot_format: {self.plot_format!r}")
         for path in (self.output_dir, self.results_dir, self.plots_dir, self.logs_dir):
             path.mkdir(parents=True, exist_ok=True)
 
@@ -53,3 +56,6 @@ class BaseExperiment(ABC):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with (self.logs_dir / "experiment.log").open("a", encoding="utf-8") as handle:
             handle.write(f"[{timestamp}] {message}\n")
+
+    def plot_filename(self, stem: str) -> str:
+        return f"{stem}.{self.plot_format}"

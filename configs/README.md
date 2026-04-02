@@ -8,7 +8,7 @@
 
 | Config 文件 | `experiment.type` | 分析对象 | 核心问题 | 主要方法 | 主要指标 | 主要输出 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `probing_concepts.yaml` | `probing` | encoder + decoder hidden states | 某个 concept 是否能在各层表征中被线性读出 | layer-wise probing | probe accuracy | `summary.json` + probing accuracy plots |
+| `probing_concepts.yaml` | `probing` | encoder + decoder hidden states | 某个 concept 是否能在各层表征中被线性读出 | layer-wise probing + random-label baseline | probe accuracy + random baseline | `summary.json` + probing accuracy plots |
 | `patching_decoder_activation.yaml` | `patching` | decoder image-token activations | decoder 某层 image-token activation 是否因果影响属性判断 | activation patching | `probability_change / P(Yes)` | `results/*.json/csv` + `plots/probability_change/` |
 | `patching_encoder_component.yaml` | `patching` | encoder block 内部组件 | encoder 中 residual / attention / MLP / qkv 子模块分别贡献多少 | component patching | `probability_change` + ratio views | 5 类 component plots + JSON/CSV |
 | `patching_decoder_component.yaml` | `patching` | decoder block 内部组件 | decoder 中 residual / attention / MLP / q/k/v/proj 分别贡献多少 | component patching | `probability_change` + ratio views | 5 类 component plots + JSON/CSV |
@@ -100,17 +100,20 @@
 - `results/summary.json`
   - 汇总所有 concepts 的 probing 结果
 - `results/{concept}_probing_stats.csv`
-  - 每个 concept 每一层的 accuracy、train/test 样本数
-- `plots/encoder_probing_accuracy.png`
+  - 每个 concept 每一层的真实 accuracy、random baseline mean/std、train/test 样本数
+- `plots/encoder_probing_accuracy.{png|pdf}`
   - encoder 总图
-- `plots/decoder_probing_accuracy.png`
+- `plots/decoder_probing_accuracy.{png|pdf}`
   - decoder 总图
+- `plots/per_attribute/{concept}_encoder_probing_accuracy.{png|pdf}`
+- `plots/per_attribute/{concept}_decoder_probing_accuracy.{png|pdf}`
 
 图的风格不是简单的单概念折线，而是：
 
 - affective concepts 和 non-affective concepts 分组画
-- 每个 concept 一条曲线
-- 再叠加组均值曲线和标准差阴影
+- 每个 concept 一条真实 probing 曲线
+- 每个 concept 再加一条 random-label baseline 对照曲线
+- 再叠加组均值曲线和对应的 random baseline 组均值曲线
 
 ### 1.5 当前配置中的关键参数
 
@@ -122,6 +125,8 @@
   - 控制 decoder probing 时看到的文本上下文
 - `probing.test_size: 0.2`
   - 20% 做测试集
+- `output.plot_format: png`
+  - 控制图像输出为 `png` 或 `pdf`
 
 ### 1.6 适合回答什么研究问题
 

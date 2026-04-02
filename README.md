@@ -35,6 +35,7 @@ python run_experiment.py --config configs/attention_analysis_decoder.yaml
 - `dataset.root` is the shared base directory. CSV files are resolved as `dataset.root / "SUN" / "{csv_stem}.csv"`.
 - Probing expects explicit grouped concepts under `dataset.concepts`.
 - Probing prompt is provided entirely by config through `probing.prompt`.
+- Probing now adds a 3-run random-label baseline for both encoder and decoder plots/results.
 - `patching` keeps the original validated combinations:
   - `method=activation, stage=decoder`
   - `method=component, stage=encoder`
@@ -52,6 +53,7 @@ python run_experiment.py --config configs/attention_analysis_decoder.yaml
 - `attention_analysis` adds decoder head-level analysis driven by `attention_analysis.prompt`, `attention_analysis.top_k_heads`, and `attention_analysis.token_groups`.
 - `attention_analysis` supports `dataset.concepts[*].csv` or `csv_stem`, and accepts `group: control` as an alias for `non_affective`.
 - `attention_analysis` interprets `dataset.num_samples` as “up to N positive images and up to N negative images per concept”.
+- `output.plot_format` is shared by all experiments and supports `png` or `pdf` (default: `png`).
 - `attention_analysis` saves:
   - layer allocation curves under `plots/attention_allocation/`
   - single-concept and grouped heatmaps under `plots/head_importance/`

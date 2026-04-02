@@ -35,6 +35,7 @@ GROUP_MEAN_COLORS = {
     "non_affective": "#1E3A8A",
     "affective": "#991B1B",
 }
+CONTROL_COLOR = "#6B7280"
 MODE_COLORS = {
     "noise": "tab:blue",
     "zero": "tab:orange",
@@ -103,6 +104,20 @@ def get_group_curves(summary: dict, component: str, group: str) -> np.ndarray:
 def get_group_stats(summary: dict, component: str, group: str) -> tuple[np.ndarray, np.ndarray]:
     curves = get_group_curves(summary, component, group)
     return np.mean(curves, axis=0), np.std(curves, axis=0)
+
+
+def get_global_control_mean(summary: dict, component: str) -> np.ndarray:
+    concept_order = get_selected_concepts(summary)
+    curves = [
+        summary["results"][concept][f"{component}_random_label_mean"]
+        for concept in concept_order
+    ]
+    return np.mean(np.array(curves, dtype=float), axis=0)
+
+
+def get_model_display_name(summary: dict) -> str:
+    meta = summary.get("meta", {})
+    return meta.get("model_display_name") or meta.get("model_path", "model")
 
 
 def get_x_positions(num_points: int) -> list[int]:
@@ -191,7 +206,19 @@ def plot_grouped_probing_accuracy(
             zorder=10,
         )
 
-    ax.set_title(f"{component.capitalize()} Probing Accuracy by Layer")
+    global_control_mean = get_global_control_mean(summary, component)
+    layers = get_x_positions(len(global_control_mean))
+    ax.plot(
+        layers,
+        global_control_mean,
+        color=CONTROL_COLOR,
+        linestyle=":",
+        linewidth=MEAN_LINEWIDTH - 0.2,
+        label="random-label mean",
+        zorder=8,
+    )
+
+    ax.set_title(f"{get_model_display_name(summary)} - {component.capitalize()} Probing Accuracy by Layer")
     ax.set_xlabel("Input / Layer Output")
     ax.set_ylabel("Accuracy")
     ax.set_ylim(*Y_AXIS_LIMITS)
@@ -253,6 +280,15 @@ def plot_grouped_probing_accuracy(
             linewidth=MEAN_LINEWIDTH,
             label="affective mean",
         )
+    ] + [
+        Line2D(
+            [0],
+            [0],
+            color=CONTROL_COLOR,
+            linestyle=":",
+            linewidth=MEAN_LINEWIDTH - 0.2,
+            label="random-label mean",
+        )
     ]
     ax.legend(
         handles=legend_handles,
@@ -263,6 +299,51 @@ def plot_grouped_probing_accuracy(
         frameon=True,
     )
 
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_single_attribute_probing_accuracy(
+    summary: dict,
+    concept_name: str,
+    component: str,
+    output_path: Path,
+    dpi: int = 300,
+) -> None:
+    concept_result = summary["results"][concept_name]
+    accuracies = np.array(concept_result[f"{component}_layer_accuracy"], dtype=float)
+    random_mean = np.array(concept_result[f"{component}_random_label_mean"], dtype=float)
+    layers = get_x_positions(len(accuracies))
+    color = "#DC2626" if concept_result["group"] == "affective" else "#1D4ED8"
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(
+        layers,
+        accuracies,
+        color=color,
+        linewidth=2.5,
+        linestyle="-",
+        label="real probing",
+    )
+    ax.plot(
+        layers,
+        random_mean,
+        color=CONTROL_COLOR,
+        linewidth=2.0,
+        linestyle="--",
+        label="random-label baseline",
+    )
+    xticks, xtick_labels = get_xticks_and_labels(layers)
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xtick_labels)
+    ax.set_xlim(left=min(layers), right=max(layers))
+    ax.set_xlabel("Input / Layer Output")
+    ax.set_ylabel("Accuracy")
+    ax.set_ylim(*Y_AXIS_LIMITS)
+    ax.grid(axis="y", alpha=GRID_ALPHA, color=GRID_COLOR, linestyle=GRID_LINESTYLE, linewidth=GRID_LINEWIDTH)
+    ax.set_title(f"{get_model_display_name(summary)} - {concept_name} - {component.capitalize()} Probing")
+    ax.legend(fontsize=9)
     fig.tight_layout()
     fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)

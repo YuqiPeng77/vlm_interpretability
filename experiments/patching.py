@@ -798,7 +798,7 @@ class PatchingExperiment(BaseExperiment):
                         concept_name=concept.name,
                         p_yes_clean_mean=p_yes_clean_mean,
                         p_yes_corrupted_mean=p_yes_corrupted_mean,
-                        save_path=metric_dir / f"{concept.name}_{mode}_p_yes.png",
+                        save_path=metric_dir / self.plot_filename(f"{concept.name}_{mode}_p_yes"),
                     )
 
             concept_result = {
@@ -966,7 +966,7 @@ class PatchingExperiment(BaseExperiment):
                     )
                     metric_dir = self._metric_plot_dir(metric_name, "level_1_block_residual")
                     self._plot_overlay_probability(
-                        metric_dir / f"{concept.name}_block_residual_p_yes.png",
+                        metric_dir / self.plot_filename(f"{concept.name}_block_residual_p_yes"),
                         selected_layers,
                         ["both"],
                         {"both": coarse_summary["both"]},
@@ -999,7 +999,7 @@ class PatchingExperiment(BaseExperiment):
                     )
                     metric_dir = self._metric_plot_dir(metric_name, "level_2_component_decomposition")
                     self._plot_overlay_probability(
-                        metric_dir / f"{concept.name}_component_decomposition_p_yes.png",
+                        metric_dir / self.plot_filename(f"{concept.name}_component_decomposition_p_yes"),
                         selected_layers,
                         ["attn_only", "mlp_only", "both"],
                         {
@@ -1041,7 +1041,7 @@ class PatchingExperiment(BaseExperiment):
                     )
                     metric_dir = self._metric_plot_dir(metric_name, "level_3_attn_submodule_decomposition")
                     self._plot_overlay_probability(
-                        metric_dir / f"{concept.name}_attn_submodule_decomposition_p_yes.png",
+                        metric_dir / self.plot_filename(f"{concept.name}_attn_submodule_decomposition_p_yes"),
                         selected_layers,
                         ["q", "k", "v", "attn_only"],
                         {

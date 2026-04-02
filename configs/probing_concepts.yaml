@@ -42,6 +42,7 @@ probing:
 
 output:
   base_dir: ./output
+  plot_format: png
 
 runtime:
   seed: 42
