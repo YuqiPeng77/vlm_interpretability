@@ -1,6 +1,6 @@
 experiment:
-  type: probing
-  name: probing_all_concepts
+  type: pca_visualization
+  name: pca_visualization_all_concepts
 
 model:
   name: Qwen3-VL-8B-Instruct
@@ -10,7 +10,7 @@ model:
 
 dataset:
   root: /data1/yqpeng/spatial/dataset
-  max_samples_per_attr: 20
+  max_samples_per_attr: 0
   concepts:
     - name: natural
       csv_stem: natural
@@ -31,13 +31,17 @@ dataset:
       csv_stem: stressful
       group: affective
 
-probing:
-  probe_type: logistic
+pca_visualization:
   components:
     - encoder
     - decoder
+  selected_layers:
+    encoder:
+      - all
+    decoder:
+      - all
+
   prompt: "Describe this image."
-  test_size: 0.2
   dpi: 300
 
 output:

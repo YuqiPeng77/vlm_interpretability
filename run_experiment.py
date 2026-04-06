@@ -140,6 +140,14 @@ def build_experiment(config: dict, output_dir: Path):
         from experiments.attention_analysis import AttentionAnalysisExperiment
 
         return AttentionAnalysisExperiment(config, output_dir)
+    if experiment_type == "pca_visualization":
+        from experiments.pca_visualization import PCAVisualizationExperiment
+
+        return PCAVisualizationExperiment(config, output_dir)
+    if experiment_type == "fisher_ratio":
+        from experiments.fisher_ratio import FisherRatioExperiment
+
+        return FisherRatioExperiment(config, output_dir)
     raise ValueError(f"Unsupported experiment type: {experiment_type}")
 
 

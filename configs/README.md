@@ -9,6 +9,8 @@
 | Config 文件 | `experiment.type` | 分析对象 | 核心问题 | 主要方法 | 主要指标 | 主要输出 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `probing_concepts.yaml` | `probing` | encoder + decoder hidden states | 某个 concept 是否能在各层表征中被线性读出 | layer-wise probing + random-label baseline | probe accuracy + random baseline | `summary.json` + probing accuracy plots |
+| `fisher_ratio_encoder.yaml` | `fisher_ratio` | encoder hidden states | 某个 concept 在各层 encoder 表征中的类间分离度有多强 | Fisher's Linear Discriminant Ratio | Fisher ratio + between/within variance | `summary.json` + Fisher ratio CSV + plots |
+| `pca_visualization_concepts.yaml` | `pca_visualization` | selected encoder / decoder hidden states | 正负样本在指定层的表征空间是否已经出现可见分离 | PCA(2D) scatter visualization | PC1 / PC2 separation + explained variance | `summary.json` + PCA scatter grids + PCA point CSV |
 | `patching_decoder_activation.yaml` | `patching` | decoder image-token activations | decoder 某层 image-token activation 是否因果影响属性判断 | activation patching | `probability_change / P(Yes)` | `results/*.json/csv` + `plots/probability_change/` |
 | `patching_encoder_component.yaml` | `patching` | encoder block 内部组件 | encoder 中 residual / attention / MLP / qkv 子模块分别贡献多少 | component patching | `probability_change` + ratio views | 5 类 component plots + JSON/CSV |
 | `patching_decoder_component.yaml` | `patching` | decoder block 内部组件 | decoder 中 residual / attention / MLP / q/k/v/proj 分别贡献多少 | component patching | `probability_change` + ratio views | 5 类 component plots + JSON/CSV |
@@ -133,6 +135,122 @@
 - affective concepts 是否在模型表征里可读？
 - affective 与 non-affective concepts 的层级曲线是否不同？
 - encoder 和 decoder 哪一边更容易承载这些概念信息？
+
+## 1.7. `pca_visualization_concepts.yaml`
+
+### 1.7.1 实验目的
+
+这个实验是 probing 的一个定性补充对照。  
+它不再训练线性分类器，而是直接把指定层的 hidden representation 投影到 2D PCA 空间里，观察 positive / negative 样本是否已经出现肉眼可见的分离结构。
+
+它特别适合回答：
+
+- affective concepts 在早期层是否仍然高度重叠？
+- non-affective concepts 是否在更早层就已经拉开？
+- probing 曲线里“后期才变得可读”的概念，在 PCA 图里是否也呈现出相同趋势？
+
+### 1.7.2 实验方法
+
+实现流程与 `probing_concepts.yaml` 基本一致：
+
+1. 读取每个 concept 的 CSV，并按 `dataset.max_samples_per_attr` 可选截断样本。
+2. 用统一 prompt 跑前向，当前默认 prompt 也是：
+
+   ```text
+   Describe this image.
+   ```
+
+3. 通过 encoder / decoder probing hooks 抓取 hidden states。
+4. 对 encoder 仍使用 spatial token mean-pooling；对 decoder 仍使用最后一个 token hidden vector。
+5. 只保留 `pca_visualization.selected_layers` 中声明的层。
+   如果某个 component 写成 `- all`，则会自动展开为“输入层 `-1` + 该 component 的全部层输出”。
+6. 对每个 concept、每个 component、每个选中层：
+   - 取全部 positive / negative 样本特征
+   - 先做 `StandardScaler`
+   - 再做 top-2 PCA
+   - 绘制 2D scatter，并按类别着色
+
+### 1.7.3 实验结果形式
+
+这个实验会输出：
+
+- `results/summary.json`
+  - 每个 concept / component / layer 的样本数与 PCA explained variance
+- `results/{concept}_pca_points.csv`
+  - 每个样本在每个选中层上的 `PC1 / PC2` 坐标
+- `plots/pca/{concept}/{component}_pca.{png|pdf}`
+  - 一个 concept 对应一个 component PCA grid 图，图中包含多个选中层
+- `plots/pca/{concept}/{component}/{component}_L{layer}.{png|pdf}`
+  - 每个选中层单独保存一张 PCA scatter；如果层号是 `-1`，文件名会写成 `{component}_input`
+
+### 1.7.4 当前配置中的关键参数
+
+- `pca_visualization.components`
+  - 控制跑 encoder、decoder，或两者都跑
+- `pca_visualization.selected_layers`
+  - 显式指定每个 component 要可视化的层号，例如 `encoder: [0, 5, 10, 15, 20, 26]`
+  - 也支持 `encoder: [all]` 或 `decoder: [all]`，表示包含输入层 `-1` 在内的全部层
+- `pca_visualization.prompt`
+  - 控制 forward 时使用的文本上下文
+- `pca_visualization.dpi`
+  - 控制散点图输出分辨率
+
+## 1.8. `fisher_ratio_encoder.yaml`
+
+### 1.8.1 实验目的
+
+这个实验是 probing 的一个定量补充。  
+它不训练分类器，而是直接计算每一层 encoder representation 对正负样本的 Fisher's Linear Discriminant Ratio，衡量类间均值差异相对类内离散度的强弱。
+
+它特别适合回答：
+
+- affective concepts 在 encoder 的哪些层开始出现更强的类间分离？
+- non-affective controls 的分离曲线与 affective concepts 是否不同？
+- probing 可读性提升的位置，是否也对应 Fisher ratio 的显著上升？
+
+### 1.8.2 实验方法
+
+实现流程与 probing 的对应 component 路径一致：
+
+1. 读取每个 concept 的 CSV，并按 `dataset.max_samples_per_attr` 可选截断样本。
+2. 用相同 prompt 跑 Qwen3-VL 前向。
+3. 对 `fisher_ratio.components` 中指定的 component 挂同样的 probing hooks，抓取 `input(-1)` 到最后一层的 hidden states。
+4. 对每层 hidden states 做和 probing 一致的特征抽取:
+   - encoder: 对视觉 token mean-pooling，得到每张图一个 encoder feature
+   - decoder: 取最后一个文本 token 的 hidden state，得到每张图一个 decoder feature
+5. 按 `attribute_label` 分成 positive / negative 两组，并计算：
+
+   ```text
+   between = ||mu_pos - mu_neg||^2
+   within = mean(||x - mu_pos||^2) + mean(||x - mu_neg||^2)
+   fisher_ratio = between / (within + epsilon)
+   ```
+
+### 1.8.3 实验结果形式
+
+这个实验会输出：
+
+- `results/summary.json`
+  - 每个 concept 从 `-1` 到最后一层的 Fisher ratio 及辅助统计
+- `results/fisher_ratio_by_layer.csv`
+  - 所有 concept 的逐层 Fisher ratio、between/within variance、正负样本数
+- `plots/encoder.{png|pdf}` / `plots/decoder.{png|pdf}`
+  - 每个 component 一张汇总图，同时包含各个 attribute 曲线和 affective / non-affective group mean
+- `plots/{concept}/encoder.{png|pdf}` / `plots/{concept}/decoder.{png|pdf}`
+  - 每个 component 各自的单个 concept Fisher ratio 曲线
+
+### 1.8.4 当前配置中的关键参数
+
+- `fisher_ratio.components`
+  - 可选 `encoder` / `decoder`，默认两者都跑
+- `fisher_ratio.prompt`
+  - 控制 forward 使用的文本上下文
+- `fisher_ratio.epsilon`
+  - 避免 `within_class_variance == 0` 时分母为零
+- `fisher_ratio.dpi`
+  - 控制 Fisher ratio 图像输出分辨率
+- `output.plot_format`
+  - 控制 Fisher ratio 图像输出为 `png` 或 `pdf`
 
 ## 2. `patching_decoder_activation.yaml`
 

@@ -1,25 +1,18 @@
 from __future__ import annotations
 
-import gc
 from pathlib import Path
 
 import numpy as np
-import torch
-from tqdm import tqdm
 
 from experiments.base import BaseExperiment
 from shared.data_loader import (
     limit_records,
-    load_image_safe,
     load_records,
     parse_concept_specs,
     resolve_csv_path,
-    resolve_image_path,
 )
-from shared.hook_manager import HookManager
+from shared.feature_extraction import build_image_chat_prompt, collect_component_features
 from shared.metrics import (
-    extract_decoder_feature,
-    extract_encoder_feature,
     train_logistic_probe_with_random_baseline,
 )
 from shared.model_loader import ModelBundle, load_model_bundle
@@ -30,17 +23,7 @@ from shared.visualizer import (
 
 
 def build_prompt(processor, probing_config: dict) -> str:
-    prompt_text = probing_config.get("prompt")
-    if not prompt_text:
-        raise ValueError("probing.prompt is required and must be a non-empty string.")
-
-    messages = [
-        {
-            "role": "user",
-            "content": [{"type": "image"}, {"type": "text", "text": prompt_text}],
-        }
-    ]
-    return processor.apply_chat_template(messages, add_generation_prompt=True)
+    return build_image_chat_prompt(processor, probing_config.get("prompt"), "probing.prompt")
 
 
 class ProbingExperiment(BaseExperiment):
@@ -71,19 +54,6 @@ class ProbingExperiment(BaseExperiment):
             f"{self.bundle.num_enc_layers} encoder blocks and {self.bundle.num_dec_layers} decoder layers."
         )
 
-    def _prepare_inputs(self, image_path: Path, prompt: str) -> dict:
-        assert self.bundle is not None
-        image = load_image_safe(image_path, logger=self.log)
-        if image is None:
-            raise ValueError(f"Could not load image: {image_path}")
-        inputs = self.bundle.processor(images=image, text=prompt, return_tensors="pt")
-        return {key: value.to(self.bundle.input_device) for key, value in inputs.items()}
-
-    def _empty_cache(self) -> None:
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
     def _resolved_prompt_text(self) -> str:
         return self.probing_config["prompt"]
 
@@ -103,6 +73,10 @@ class ProbingExperiment(BaseExperiment):
         # resulting curve can compare raw incoming representations against layer outputs.
         enc_slots = self.bundle.num_enc_layers + 1
         dec_slots = self.bundle.num_dec_layers + 1
+        selected_layers = {
+            component: (list(range(-1, self.bundle.num_enc_layers)) if component == "encoder" else list(range(-1, self.bundle.num_dec_layers)))
+            for component in self.components
+        }
         summary_results: dict[str, dict] = {}
 
         for concept_idx, concept in enumerate(self.concepts):
@@ -110,83 +84,17 @@ class ProbingExperiment(BaseExperiment):
             records = load_records(csv_path)
             seed = int(self.runtime_config.get("seed", 42)) + concept_idx
             records = limit_records(records, self.max_samples, seed)
-            labels: list[int] = []
-            enc_features = [[] for _ in range(enc_slots)]
-            dec_features = [[] for _ in range(dec_slots)]
-            skipped = 0
-
-            progress = tqdm(records, desc=f"probing-{concept.name}", unit="img")
-            for record in progress:
-                image_path = resolve_image_path(self.dataset_root, record["image_path"])
-                if not image_path.exists():
-                    skipped += 1
-                    self.log(f"Skipping missing image {image_path}")
-                    continue
-
-                try:
-                    inputs = self._prepare_inputs(image_path, prompt)
-                except Exception as exc:
-                    skipped += 1
-                    self.log(f"Skipping image {image_path}: {exc}")
-                    continue
-
-                with HookManager() as hooks:
-                    if "encoder" in self.components:
-                        hooks.register_encoder_probing_hooks(self.bundle.encoder_blocks)
-                    if "decoder" in self.components:
-                        hooks.register_decoder_probing_hooks(self.bundle.decoder_layers)
-
-                    with torch.no_grad():
-                        _ = self.bundle.model(**inputs, return_dict=True, use_cache=False)
-
-                    if "encoder" in self.components:
-                        enc_count = len(
-                            [
-                                key
-                                for key in hooks.hidden_cache
-                                if isinstance(key, tuple) and key[0] == "enc"
-                            ]
-                        )
-                        if enc_count != enc_slots:
-                            skipped += 1
-                            self.log(
-                                f"Skipping {image_path}: expected {enc_slots} encoder hooks, got {enc_count}"
-                            )
-                            continue
-                    if "decoder" in self.components:
-                        dec_count = len(
-                            [
-                                key
-                                for key in hooks.hidden_cache
-                                if isinstance(key, tuple) and key[0] == "dec"
-                            ]
-                        )
-                        if dec_count != dec_slots:
-                            skipped += 1
-                            self.log(
-                                f"Skipping {image_path}: expected {dec_slots} decoder hooks, got {dec_count}"
-                            )
-                            continue
-
-                    if "encoder" in self.components:
-                        # Encoder features are pooled across spatial/image tokens so each
-                        # block contributes one fixed-width representation per image.
-                        for layer_idx in range(-1, self.bundle.num_enc_layers):
-                            enc_features[layer_idx + 1].append(
-                                extract_encoder_feature(hooks.hidden_cache, layer_idx)
-                            )
-                    if "decoder" in self.components:
-                        # Decoder probing uses the last token position because the final
-                        # decision is made autoregressively from that location.
-                        for layer_idx in range(-1, self.bundle.num_dec_layers):
-                            dec_features[layer_idx + 1].append(
-                                extract_decoder_feature(hooks.hidden_cache, layer_idx)
-                            )
-
-                labels.append(int(record["attribute_label"]))
-                self._empty_cache()
-
-            labels_array = np.array(labels)
+            collected = collect_component_features(
+                bundle=self.bundle,
+                dataset_root=self.dataset_root,
+                records=records,
+                prompt=prompt,
+                components=self.components,
+                selected_layers=selected_layers,
+                logger=self.log,
+                progress_desc=f"probing-{concept.name}",
+            )
+            labels_array = collected["labels"]
             if labels_array.size == 0 or len(np.unique(labels_array)) < 2:
                 raise RuntimeError(
                     f"Concept {concept.name!r} does not have enough valid samples for probing."
@@ -196,13 +104,18 @@ class ProbingExperiment(BaseExperiment):
                 "group": concept.group,
                 "csv_file": csv_path.name,
                 "num_samples_used": int(labels_array.size),
-                "num_skipped": int(skipped),
+                "num_skipped": int(collected["skipped"]),
             }
             summary_rows: list[dict] = []
 
             if "encoder" in self.components:
                 # Each slot gets its own linear probe so the accuracy curve remains
                 # interpretable as "how decodable is the concept at this stage".
+                # [28, 20, 1152]
+                enc_features = [
+                    collected["feature_bank"]["encoder"][layer_idx]
+                    for layer_idx in selected_layers["encoder"]
+                ]
                 encoder_acc, encoder_stats = train_logistic_probe_with_random_baseline(
                     enc_features,
                     labels_array,
@@ -237,6 +150,11 @@ class ProbingExperiment(BaseExperiment):
                 )
 
             if "decoder" in self.components:
+                # [37, 20, 4096]
+                dec_features = [
+                    collected["feature_bank"]["decoder"][layer_idx]
+                    for layer_idx in selected_layers["decoder"]
+                ]
                 decoder_acc, decoder_stats = train_logistic_probe_with_random_baseline(
                     dec_features,
                     labels_array,
@@ -300,27 +218,27 @@ class ProbingExperiment(BaseExperiment):
             plot_grouped_probing_accuracy(
                 summary,
                 component="encoder",
-                output_path=self.plots_dir / self.plot_filename("encoder_probing_accuracy"),
+                output_path=self.plots_dir / self.plot_filename("encoder"),
                 dpi=int(self.probing_config.get("dpi", 300)),
             )
         if "decoder" in self.components:
             plot_grouped_probing_accuracy(
                 summary,
                 component="decoder",
-                output_path=self.plots_dir / self.plot_filename("decoder_probing_accuracy"),
+                output_path=self.plots_dir / self.plot_filename("decoder"),
                 dpi=int(self.probing_config.get("dpi", 300)),
             )
-        per_attribute_dir = self.plots_dir / "per_attribute"
-        per_attribute_dir.mkdir(parents=True, exist_ok=True)
         for concept in self.concepts:
             if concept.name not in summary_results:
                 continue
+            concept_plot_dir = self.plots_dir / concept.name
+            concept_plot_dir.mkdir(parents=True, exist_ok=True)
             if "encoder" in self.components:
                 plot_single_attribute_probing_accuracy(
                     summary,
                     concept_name=concept.name,
                     component="encoder",
-                    output_path=per_attribute_dir / self.plot_filename(f"{concept.name}_encoder_probing_accuracy"),
+                    output_path=concept_plot_dir / self.plot_filename("encoder"),
                     dpi=int(self.probing_config.get("dpi", 300)),
                 )
             if "decoder" in self.components:
@@ -328,7 +246,7 @@ class ProbingExperiment(BaseExperiment):
                     summary,
                     concept_name=concept.name,
                     component="decoder",
-                    output_path=per_attribute_dir / self.plot_filename(f"{concept.name}_decoder_probing_accuracy"),
+                    output_path=concept_plot_dir / self.plot_filename("decoder"),
                     dpi=int(self.probing_config.get("dpi", 300)),
                 )
         self.log("Probing experiment completed.")

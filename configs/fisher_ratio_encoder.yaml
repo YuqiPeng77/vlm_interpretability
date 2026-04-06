@@ -1,6 +1,6 @@
 experiment:
-  type: probing
-  name: probing_all_concepts
+  type: fisher_ratio
+  name: fisher_ratio_encoder
 
 model:
   name: Qwen3-VL-8B-Instruct
@@ -31,13 +31,12 @@ dataset:
       csv_stem: stressful
       group: affective
 
-probing:
-  probe_type: logistic
+fisher_ratio:
   components:
     - encoder
     - decoder
   prompt: "Describe this image."
-  test_size: 0.2
+  epsilon: 1e-10
   dpi: 300
 
 output:

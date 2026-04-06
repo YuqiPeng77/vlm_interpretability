@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import make_pipeline
@@ -73,6 +74,56 @@ def _make_logistic_pipeline(seed: int):
         StandardScaler(with_mean=True, with_std=True),
         LogisticRegression(max_iter=2000, random_state=seed),
     )
+
+
+def compute_pca_projection(
+    features: list[np.ndarray],
+    seed: int,
+) -> tuple[np.ndarray, list[float]]:
+    feature_matrix = np.stack(features, axis=0)
+    if feature_matrix.shape[0] < 2:
+        raise ValueError("PCA requires at least 2 samples.")
+
+    standardized = StandardScaler(with_mean=True, with_std=True).fit_transform(feature_matrix)
+    if np.allclose(standardized, 0.0):
+        return np.zeros((feature_matrix.shape[0], 2), dtype=float), [0.0, 0.0]
+
+    projector = PCA(n_components=2, random_state=seed)
+    projected = np.nan_to_num(projector.fit_transform(standardized), nan=0.0)
+    explained_variance = [
+        float(value)
+        for value in np.nan_to_num(projector.explained_variance_ratio_[:2], nan=0.0)
+    ]
+    return projected, explained_variance
+
+
+def compute_fisher_ratio(
+    positive_features: np.ndarray | list[np.ndarray],
+    negative_features: np.ndarray | list[np.ndarray],
+    epsilon: float,
+) -> dict:
+    x_pos = np.asarray(positive_features, dtype=float)
+    x_neg = np.asarray(negative_features, dtype=float)
+    if x_pos.ndim != 2 or x_neg.ndim != 2:
+        raise ValueError("Fisher ratio expects 2D positive and negative feature matrices.")
+    if x_pos.shape[0] == 0 or x_neg.shape[0] == 0:
+        raise ValueError("Fisher ratio requires at least one positive and one negative sample.")
+
+    mu_pos = np.mean(x_pos, axis=0)
+    mu_neg = np.mean(x_neg, axis=0)
+    between = float(np.sum((mu_pos - mu_neg) ** 2))
+    within_pos = np.mean(np.sum((x_pos - mu_pos) ** 2, axis=1))
+    within_neg = np.mean(np.sum((x_neg - mu_neg) ** 2, axis=1))
+    within = float(within_pos + within_neg)
+    ratio = float(between / (within + float(epsilon)))
+
+    return {
+        "fisher_ratio": ratio,
+        "between_class_variance": between,
+        "within_class_variance": within,
+        "num_positive": int(x_pos.shape[0]),
+        "num_negative": int(x_neg.shape[0]),
+    }
 
 
 def train_logistic_probe_with_random_baseline(

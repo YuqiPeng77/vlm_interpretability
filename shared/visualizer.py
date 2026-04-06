@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
+from math import ceil
 
 
 SELECTED_NON_AFFECTIVE = {
@@ -47,6 +48,10 @@ MODE_COLORS = {
     "k": "tab:orange",
     "v": "tab:green",
     "proj": "tab:red",
+}
+PCA_CLASS_STYLES = {
+    0: {"color": "#2563EB", "label": "negative"},
+    1: {"color": "#DC2626", "label": "positive"},
 }
 
 
@@ -347,6 +352,340 @@ def plot_single_attribute_probing_accuracy(
     fig.tight_layout()
     fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
+
+
+def plot_pca_scatter_grid(
+    layer_payloads: list[dict],
+    concept_name: str,
+    component: str,
+    model_display_name: str,
+    output_path: Path,
+    dpi: int = 300,
+) -> None:
+    if not layer_payloads:
+        raise ValueError("No PCA payloads available to plot.")
+
+    x_limits, y_limits = get_pca_axis_limits(layer_payloads)
+    num_plots = len(layer_payloads)
+    ncols = 1 if num_plots == 1 else 2
+    nrows = ceil(num_plots / ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6.2 * ncols, 4.8 * nrows), squeeze=False)
+    axes_flat = list(axes.flat)
+
+    for ax, payload in zip(axes_flat, layer_payloads):
+        draw_pca_scatter(ax, payload, x_limits, y_limits)
+
+    for ax in axes_flat[num_plots:]:
+        ax.axis("off")
+
+    legend_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            label=style["label"],
+            markerfacecolor=style["color"],
+            markeredgecolor="white",
+            markeredgewidth=0.35,
+            markersize=7,
+        )
+        for style in PCA_CLASS_STYLES.values()
+    ]
+    fig.legend(handles=legend_handles, loc="upper right", frameon=True)
+    fig.suptitle(f"{model_display_name} - {concept_name} - {component.capitalize()} PCA", y=0.995)
+    fig.tight_layout(rect=(0.0, 0.0, 0.98, 0.96))
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def get_pca_axis_limits(layer_payloads: list[dict]) -> tuple[tuple[float, float], tuple[float, float]]:
+    all_points = np.concatenate(
+        [np.asarray(payload["points"], dtype=float) for payload in layer_payloads],
+        axis=0,
+    )
+    x_values = all_points[:, 0]
+    y_values = all_points[:, 1]
+    x_margin = max((x_values.max() - x_values.min()) * 0.08, 0.5)
+    y_margin = max((y_values.max() - y_values.min()) * 0.08, 0.5)
+    x_limits = (x_values.min() - x_margin, x_values.max() + x_margin)
+    y_limits = (y_values.min() - y_margin, y_values.max() + y_margin)
+    return x_limits, y_limits
+
+
+def get_pca_layer_label(layer_idx: int) -> str:
+    return "Input" if layer_idx < 0 else f"L{layer_idx}"
+
+
+def draw_pca_scatter(
+    ax,
+    payload: dict,
+    x_limits: tuple[float, float],
+    y_limits: tuple[float, float],
+) -> None:
+    points = np.asarray(payload["points"], dtype=float)
+    labels = np.asarray(payload["labels"], dtype=int)
+    layer_idx = int(payload["layer"])
+    explained_variance = payload["explained_variance_ratio"]
+    layer_label = get_pca_layer_label(layer_idx)
+
+    for class_label, style in PCA_CLASS_STYLES.items():
+        mask = labels == class_label
+        if not np.any(mask):
+            continue
+        ax.scatter(
+            points[mask, 0],
+            points[mask, 1],
+            s=34,
+            alpha=0.82,
+            color=style["color"],
+            label=style["label"],
+            edgecolors="white",
+            linewidths=0.35,
+        )
+
+    ax.axhline(0.0, color="#9CA3AF", linewidth=0.8, alpha=0.8)
+    ax.axvline(0.0, color="#9CA3AF", linewidth=0.8, alpha=0.8)
+    ax.set_xlim(*x_limits)
+    ax.set_ylim(*y_limits)
+    ax.grid(alpha=0.25)
+    ax.set_xlabel(f"PC1 ({explained_variance[0] * 100:.1f}%)")
+    ax.set_ylabel(f"PC2 ({explained_variance[1] * 100:.1f}%)")
+    ax.set_title(f"{layer_label} | top-2 variance = {sum(explained_variance) * 100:.1f}%")
+
+
+def plot_single_pca_scatter(
+    payload: dict,
+    concept_name: str,
+    component: str,
+    model_display_name: str,
+    output_path: Path,
+    x_limits: tuple[float, float],
+    y_limits: tuple[float, float],
+    dpi: int = 300,
+) -> None:
+    layer_idx = int(payload["layer"])
+    layer_label = get_pca_layer_label(layer_idx)
+
+    fig, ax = plt.subplots(figsize=(6.4, 5.2))
+    draw_pca_scatter(ax, payload, x_limits, y_limits)
+    legend_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            label=style["label"],
+            markerfacecolor=style["color"],
+            markeredgecolor="white",
+            markeredgewidth=0.35,
+            markersize=7,
+        )
+        for style in PCA_CLASS_STYLES.values()
+    ]
+    ax.legend(handles=legend_handles, loc="best", frameon=True, fontsize=9)
+    ax.set_title(f"{model_display_name} - {concept_name} - {component.capitalize()} {layer_label} PCA")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def get_fisher_group_curves(summary: dict, component: str, group: str) -> np.ndarray:
+    concept_order = get_selected_concepts(summary)
+    curves = [
+        summary["results"][concept][f"{component}_layer_fisher_ratio"]
+        for concept in concept_order
+        if summary["results"][concept]["group"] == group
+    ]
+    return np.array(curves, dtype=float)
+
+
+def get_fisher_y_limits(curves: list[np.ndarray]) -> tuple[float, float]:
+    if not curves:
+        return (0.0, 1.0)
+    merged = np.concatenate([np.asarray(curve, dtype=float) for curve in curves], axis=0)
+    upper = float(np.max(merged))
+    if upper <= 0.0:
+        return (0.0, 1.0)
+    margin = max(upper * 0.08, 1e-6)
+    return (0.0, upper + margin)
+
+
+def plot_single_fisher_ratio_attribute(
+    summary: dict,
+    concept_name: str,
+    component: str,
+    output_path: Path,
+    dpi: int = 300,
+) -> None:
+    concept_result = summary["results"][concept_name]
+    fisher_ratio = np.array(concept_result[f"{component}_layer_fisher_ratio"], dtype=float)
+    layers = get_x_positions(len(fisher_ratio))
+    color = "#DC2626" if concept_result["group"] == "affective" else "#1D4ED8"
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(
+        layers,
+        fisher_ratio,
+        color=color,
+        linewidth=2.5,
+        linestyle="-",
+        label=DISPLAY_LABELS.get(concept_name, concept_name),
+    )
+    xticks, xtick_labels = get_xticks_and_labels(layers)
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xtick_labels)
+    ax.set_xlim(left=min(layers), right=max(layers))
+    ax.set_ylim(*get_fisher_y_limits([fisher_ratio]))
+    ax.set_xlabel("Input / Layer Output")
+    ax.set_ylabel("Fisher Ratio")
+    ax.grid(axis="y", alpha=GRID_ALPHA, color=GRID_COLOR, linestyle=GRID_LINESTYLE, linewidth=GRID_LINEWIDTH)
+    ax.set_title(f"{get_model_display_name(summary)} - {concept_name} - {component.capitalize()} Fisher Ratio")
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_fisher_ratio_all_attributes(
+    summary: dict,
+    component: str,
+    output_path: Path,
+    dpi: int = 300,
+) -> None:
+    concept_order = get_selected_concepts(summary)
+    if not concept_order:
+        raise ValueError("No concepts available to plot.")
+
+    results = summary["results"]
+    color_map = build_color_map(summary, concept_order)
+    curves = [np.array(results[concept][f"{component}_layer_fisher_ratio"], dtype=float) for concept in concept_order]
+
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE)
+    for concept in concept_order:
+        concept_result = results[concept]
+        fisher_ratio = np.array(concept_result[f"{component}_layer_fisher_ratio"], dtype=float)
+        layers = get_x_positions(len(fisher_ratio))
+        linestyle = "-" if concept_result["group"] == "non_affective" else "--"
+        ax.plot(
+            layers,
+            fisher_ratio,
+            color=color_map[concept],
+            linestyle=linestyle,
+            linewidth=INDIVIDUAL_LINEWIDTH,
+            alpha=INDIVIDUAL_ALPHA,
+            label=DISPLAY_LABELS.get(concept, concept),
+        )
+
+    average_styles = {
+        "non_affective": {
+            "color": GROUP_MEAN_COLORS["non_affective"],
+            "linestyle": "-",
+            "label": "non-affective mean",
+        },
+        "affective": {
+            "color": GROUP_MEAN_COLORS["affective"],
+            "linestyle": "--",
+            "label": "affective mean",
+        },
+    }
+    for group, style in average_styles.items():
+        group_curves = get_fisher_group_curves(summary, component, group)
+        if group_curves.size == 0:
+            continue
+        mean_curve = np.mean(group_curves, axis=0)
+        std_curve = np.std(group_curves, axis=0)
+        layers = get_x_positions(len(mean_curve))
+        lower = np.clip(mean_curve - std_curve, 0.0, None)
+        upper = mean_curve + std_curve
+        ax.fill_between(
+            layers,
+            lower,
+            upper,
+            color=style["color"],
+            alpha=STD_BAND_ALPHA,
+            linewidth=0,
+            zorder=3,
+        )
+        ax.plot(
+            layers,
+            mean_curve,
+            color=style["color"],
+            linestyle=style["linestyle"],
+            linewidth=MEAN_LINEWIDTH,
+            label=style["label"],
+            zorder=10,
+        )
+
+    x_positions = get_x_positions(len(curves[0]))
+    xticks, xtick_labels = get_xticks_and_labels(x_positions)
+    ax.set_xlim(left=min(x_positions), right=max(x_positions))
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xtick_labels)
+    ax.set_ylim(*get_fisher_y_limits(curves))
+    ax.set_xlabel("Input / Layer Output")
+    ax.set_ylabel("Fisher Ratio")
+    ax.set_title(f"{get_model_display_name(summary)} - {component.capitalize()} Fisher Ratio by Layer")
+    ax.grid(axis="y", color=GRID_COLOR, linestyle=GRID_LINESTYLE, linewidth=GRID_LINEWIDTH, alpha=GRID_ALPHA)
+
+    non_affective_handles = [
+        Line2D(
+            [0],
+            [0],
+            color=color_map[concept],
+            linestyle="-",
+            linewidth=INDIVIDUAL_LINEWIDTH,
+            label=DISPLAY_LABELS.get(concept, concept),
+            alpha=INDIVIDUAL_ALPHA,
+        )
+        for concept in concept_order
+        if results[concept]["group"] == "non_affective"
+    ]
+    affective_handles = [
+        Line2D(
+            [0],
+            [0],
+            color=color_map[concept],
+            linestyle="--",
+            linewidth=INDIVIDUAL_LINEWIDTH,
+            label=DISPLAY_LABELS.get(concept, concept),
+            alpha=INDIVIDUAL_ALPHA,
+        )
+        for concept in concept_order
+        if results[concept]["group"] == "affective"
+    ]
+    legend_handles = non_affective_handles + [
+        Line2D(
+            [0],
+            [0],
+            color=GROUP_MEAN_COLORS["non_affective"],
+            linestyle="-",
+            linewidth=MEAN_LINEWIDTH,
+            label="non-affective mean",
+        )
+    ] + affective_handles + [
+        Line2D(
+            [0],
+            [0],
+            color=GROUP_MEAN_COLORS["affective"],
+            linestyle="--",
+            linewidth=MEAN_LINEWIDTH,
+            label="affective mean",
+        )
+    ]
+    ax.legend(
+        handles=legend_handles,
+        title="Attributes",
+        loc="upper left",
+        fontsize=LEGEND_FONTSIZE,
+        title_fontsize=LEGEND_TITLE_FONTSIZE,
+        frameon=True,
+    )
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
 def plot_p_yes(
     layer_means: np.ndarray,
     layer_stds: np.ndarray,
